@@ -1,0 +1,17 @@
+# KHÔNG đưa khóa bí mật lên GitHub
+.streamlit/secrets.toml
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Hệ điều hành
+.DS_Store
+Thumbs.db
+
+# File Excel dữ liệu thật (không công khai)
+*.xlsx
+*.xls
