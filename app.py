@@ -1111,6 +1111,28 @@ def page_audit(client) -> None:
 
 GIAI_DOAN_OPTS = ["Tiềm năng", "Đang tư vấn", "Đã báo giá", "Đã chốt", "Đã thanh toán"]
 
+# CSS tiêm vào trong iframe của component kéo-thả: tô màu cột + làm đẹp thẻ
+KANBAN_STYLE = """
+.sortable-component { gap: 12px; font-family: 'Inter', sans-serif; }
+.sortable-container { background:#F1F5FB; border-radius:14px; padding:8px; min-width:190px; }
+.sortable-container-header {
+  color:#fff; font-weight:700; font-size:13.5px; border-radius:9px;
+  padding:9px 12px; margin-bottom:10px; text-align:center;
+}
+.sortable-container:nth-of-type(1) .sortable-container-header { background:linear-gradient(135deg,#2563EB,#3B82F6); }
+.sortable-container:nth-of-type(2) .sortable-container-header { background:linear-gradient(135deg,#D97706,#F59E0B); }
+.sortable-container:nth-of-type(3) .sortable-container-header { background:linear-gradient(135deg,#7C3AED,#8B5CF6); }
+.sortable-container:nth-of-type(4) .sortable-container-header { background:linear-gradient(135deg,#0EA5E9,#38BDF8); }
+.sortable-container:nth-of-type(5) .sortable-container-header { background:linear-gradient(135deg,#0F9D6B,#10B981); }
+.sortable-item {
+  background:#fff; border-radius:10px; padding:11px 13px; margin-bottom:8px;
+  box-shadow:0 1px 3px rgba(15,36,71,0.12); border-left:3px solid #2E4BA0;
+  font-weight:600; color:#1F2937; font-size:13px; cursor:grab; line-height:1.35;
+}
+.sortable-item:hover { box-shadow:0 3px 10px rgba(15,36,71,0.22); transform:translateY(-1px); }
+.sortable-item.dragging { opacity:0.85; }
+"""
+
 
 def page_pipeline(client, customers, orders, profiles) -> None:
     page_header("🎯", "Tiềm Năng", "Kéo-thả khách hàng qua các giai đoạn chăm sóc")
@@ -1125,11 +1147,11 @@ def page_pipeline(client, customers, orders, profiles) -> None:
     cust = customers.copy()
     cust["giai_doan"] = cust["giai_doan"].fillna("Tiềm năng").replace("", "Tiềm năng")
 
-    # Nhãn thẻ: "id · Tên khách" (id để map ngược, đảm bảo duy nhất)
-    def _label(r):
-        return f'{r["id"]} · {_s(r.get("ten_kh")) or "—"}'
-
-    cust["_label"] = cust.apply(_label, axis=1)
+    # Nhãn thẻ: tên khách (gọn, đẹp). Trùng tên thì thêm mã/ID để phân biệt.
+    cust["_label"] = cust["ten_kh"].apply(lambda v: _s(v) or "—")
+    dup = cust["_label"].duplicated(keep=False)
+    cust.loc[dup, "_label"] = cust.loc[dup].apply(
+        lambda r: f'{_s(r.get("ten_kh")) or "—"} · {_s(r.get("ma_kh")) or r["id"]}', axis=1)
     label_to_id = dict(zip(cust["_label"], cust["id"]))
     id_to_stage = dict(zip(cust["id"], cust["giai_doan"]))
 
@@ -1147,7 +1169,7 @@ def page_pipeline(client, customers, orders, profiles) -> None:
 
     st.caption("Kéo thẻ khách hàng từ cột này sang cột khác để đổi giai đoạn chăm sóc.")
     new_state = sort_items(containers, multi_containers=True, direction="horizontal",
-                           key="kanban_giai_doan")
+                           custom_style=KANBAN_STYLE, key="kanban_giai_doan")
 
     # Phát hiện thẻ bị kéo sang cột mới -> cập nhật database
     changed = 0
