@@ -80,8 +80,24 @@ def inject_css() -> None:
             background: linear-gradient(135deg,#C0140A,#E8483B);
             color: #fff !important; font-weight: 700; font-size: 15px;
             font-family: 'Inter', sans-serif;
-            padding: 10px 14px; border-radius: 10px; margin: 2px 0 4px;
+            padding: 9px 14px; border-radius: 10px; margin: 2px 0;
             box-shadow: 0 3px 10px rgba(192,20,10,0.30);
+          }
+          /* Giảm khoảng cách giữa các mục menu cho gọn, thẳng hàng */
+          [data-testid="stSidebar"] .stButton { margin: 0 !important; }
+          [data-testid="stSidebar"] [data-testid="stElementContainer"] { margin-bottom: 2px !important; }
+
+          /* Khung (card) bao quanh nội dung - giống bố cục CRM chuyên nghiệp */
+          [data-testid="stVerticalBlockBorderWrapper"] {
+            background: #FFFFFF;
+            border: 1px solid #EAF0F9 !important;
+            border-radius: 16px;
+            box-shadow: 0 1px 4px rgba(15,36,71,0.05);
+            padding: 6px 4px;
+          }
+          [data-testid="stVerticalBlockBorderWrapper"] h5 {
+            color: #64748B !important; font-weight: 700 !important;
+            font-size: 0.95rem !important; margin-bottom: 6px;
           }
           /* Expander trong sidebar (form đổi mật khẩu): nền trắng -> chữ tối */
           [data-testid="stSidebar"] [data-testid="stExpander"] summary,
@@ -386,9 +402,28 @@ def _mom_delta(o: pd.DataFrame, value_col: str) -> str | None:
     return None
 
 
+def _filter_period(o: pd.DataFrame, choice: str) -> pd.DataFrame:
+    """Lọc đơn theo khoảng thời gian dựa trên ngày đặt."""
+    if choice == "Tất cả" or o.empty or "ngay_dat" not in o:
+        return o
+    days = {"30 ngày": 30, "90 ngày": 90, "12 tháng": 365}.get(choice)
+    if not days:
+        return o
+    cutoff = pd.Timestamp.today().normalize() - pd.Timedelta(days=days)
+    return o[o["ngay_dat"] >= cutoff]
+
+
 def page_dashboard(client, customers, orders) -> None:
-    page_header("📊", "Tổng quan", "Bức tranh kinh doanh tổng thể")
-    o = orders_with_names(orders, customers)
+    head_l, head_r = st.columns([3, 1])
+    with head_l:
+        page_header("📊", "Tổng quan", "Bức tranh kinh doanh tổng thể")
+    with head_r:
+        period = st.selectbox("Khoảng thời gian",
+                              ["Tất cả", "12 tháng", "90 ngày", "30 ngày"],
+                              label_visibility="collapsed")
+
+    o_all = orders_with_names(orders, customers)
+    o = _filter_period(o_all, period)
 
     total_profit = o["loi_nhuan"].sum() if "loi_nhuan" in o else 0
     total_revenue = o["gia_ban"].sum() if "gia_ban" in o else 0
@@ -396,51 +431,85 @@ def page_dashboard(client, customers, orders) -> None:
     unpaid = int(o["tinh_trang_thanh_toan"].astype(str).str.contains(
         "Chưa", case=False, na=False).sum()) if "tinh_trang_thanh_toan" in o else 0
 
-    c1, c2, c3, c4 = st.columns(4)
-    kpi(c1, "💰 Tổng lợi nhuận", db.fmt_usd(total_profit), "blue", _mom_delta(o, "loi_nhuan"))
-    kpi(c2, "📈 Tổng doanh thu", db.fmt_usd(total_revenue), "green", _mom_delta(o, "gia_ban"))
-    kpi(c3, "👥 Khách hàng", f"{total_customers}", "amber")
-    kpi(c4, "⚠️ Đơn chưa thanh toán", f"{unpaid}", "red")
+    # --- Hàng 1: KPI (khung trái) + Donut tỷ lệ thành công (khung phải) ---
+    row1_l, row1_r = st.columns([3, 2])
+    with row1_l:
+        with st.container(border=True):
+            st.markdown("##### Chỉ số chính")
+            k1, k2 = st.columns(2)
+            kpi(k1, "💰 Tổng lợi nhuận", db.fmt_usd(total_profit), "blue", _mom_delta(o, "loi_nhuan"))
+            kpi(k2, "📈 Tổng doanh thu", db.fmt_usd(total_revenue), "green", _mom_delta(o, "gia_ban"))
+            st.markdown("")
+            k3, k4 = st.columns(2)
+            kpi(k3, "👥 Khách hàng", f"{total_customers}", "amber")
+            kpi(k4, "⚠️ Đơn chưa thanh toán", f"{unpaid}", "red")
 
-    st.divider()
-    left, right = st.columns([3, 2])
+    with row1_r:
+        with st.container(border=True):
+            st.markdown("##### Tỷ lệ đơn thành công")
+            done_mask = o["trang_thai_hang"].astype(str).str.contains(
+                "Đã giao|Đã nhận", case=False, na=False) if "trang_thai_hang" in o else pd.Series(dtype=bool)
+            total_o = len(o)
+            done = int(done_mask.sum()) if total_o else 0
+            rate = (done / total_o * 100) if total_o else 0
+            fig = px.pie(values=[done, max(total_o - done, 0)],
+                         names=["Thành công", "Còn lại"], hole=0.72,
+                         color_discrete_sequence=["#0F9D6B", "#E5E7EB"])
+            fig.update_traces(textinfo="none", sort=False)
+            fig.update_layout(height=260, margin=dict(l=0, r=0, t=0, b=0),
+                              showlegend=False,
+                              annotations=[dict(text=f"<b>{rate:.1f}%</b>", x=0.5, y=0.5,
+                                                font_size=26, showarrow=False)])
+            st.plotly_chart(fig, use_container_width=True)
+            st.caption(f"{done}/{total_o} đơn đã giao/nhận")
 
-    with left:
-        st.markdown("#### 🏆 Top 5 khách hàng theo lợi nhuận")
+    # --- Hàng 2: Báo cáo doanh thu (khung trái) + Trạng thái hàng (khung phải) ---
+    row2_l, row2_r = st.columns([3, 2])
+    with row2_l:
+        with st.container(border=True):
+            st.markdown("##### Báo cáo doanh thu & lợi nhuận theo tháng")
+            if not o.empty and "ngay_dat" in o and o["ngay_dat"].notna().any():
+                m = (o.dropna(subset=["ngay_dat"])
+                     .assign(thang=lambda d: d["ngay_dat"].dt.to_period("M").astype(str))
+                     .groupby("thang", as_index=False)[["gia_ban", "loi_nhuan"]].sum()
+                     .sort_values("thang"))
+                fig = px.bar(m, x="thang", y=["gia_ban", "loi_nhuan"], barmode="group",
+                             labels={"thang": "Tháng", "value": "USD", "variable": ""},
+                             color_discrete_map={"gia_ban": "#1B2A6B", "loi_nhuan": "#0F9D6B"})
+                fig.update_layout(height=320, margin=dict(l=10, r=10, t=10, b=10),
+                                  legend_title_text="")
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Chưa có dữ liệu theo tháng.")
+
+    with row2_r:
+        with st.container(border=True):
+            st.markdown("##### Tỷ lệ trạng thái hàng hoá")
+            if not o.empty and "trang_thai_hang" in o:
+                sc = o["trang_thai_hang"].fillna("Chưa rõ").replace("", "Chưa rõ").value_counts().reset_index()
+                sc.columns = ["Trạng thái", "Số đơn"]
+                fig = px.pie(sc, values="Số đơn", names="Trạng thái", hole=0.5,
+                             color_discrete_sequence=px.colors.qualitative.Set2)
+                fig.update_layout(height=320, margin=dict(l=10, r=10, t=10, b=10),
+                                  legend=dict(orientation="h", y=-0.1))
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Chưa có dữ liệu.")
+
+    # --- Hàng 3: Top khách hàng (khung) ---
+    with st.container(border=True):
+        st.markdown("##### 🏆 Top 5 khách hàng theo lợi nhuận")
         if not o.empty and o["loi_nhuan"].notna().any():
             top5 = (o.dropna(subset=["ten_kh"]).groupby("ten_kh", as_index=False)["loi_nhuan"]
                     .sum().sort_values("loi_nhuan", ascending=False).head(5))
             fig = px.bar(top5, x="loi_nhuan", y="ten_kh", orientation="h",
                          color="loi_nhuan", color_continuous_scale="Blues",
                          labels={"loi_nhuan": "Lợi nhuận (USD)", "ten_kh": "Khách hàng"})
-            fig.update_layout(height=380, margin=dict(l=10, r=10, t=10, b=10),
+            fig.update_layout(height=300, margin=dict(l=10, r=10, t=10, b=10),
                               yaxis=dict(autorange="reversed"), coloraxis_showscale=False)
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("Chưa có dữ liệu lợi nhuận.")
-
-    with right:
-        st.markdown("#### 🚢 Tỷ lệ trạng thái hàng hoá")
-        if not o.empty and "trang_thai_hang" in o:
-            sc = o["trang_thai_hang"].fillna("Chưa rõ").replace("", "Chưa rõ").value_counts().reset_index()
-            sc.columns = ["Trạng thái", "Số đơn"]
-            fig = px.pie(sc, values="Số đơn", names="Trạng thái", hole=0.45,
-                         color_discrete_sequence=px.colors.qualitative.Set2)
-            fig.update_layout(height=380, margin=dict(l=10, r=10, t=10, b=10))
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("Chưa có dữ liệu.")
-
-    if not o.empty and "ngay_dat" in o and o["ngay_dat"].notna().any():
-        st.markdown("#### 📅 Doanh thu & Lợi nhuận theo tháng")
-        m = (o.dropna(subset=["ngay_dat"])
-             .assign(thang=lambda d: d["ngay_dat"].dt.to_period("M").astype(str))
-             .groupby("thang", as_index=False)[["gia_ban", "loi_nhuan"]].sum().sort_values("thang"))
-        fig = px.bar(m, x="thang", y=["gia_ban", "loi_nhuan"], barmode="group",
-                     labels={"thang": "Tháng", "value": "USD", "variable": ""},
-                     color_discrete_map={"gia_ban": "#0E5FD8", "loi_nhuan": "#10B981"})
-        fig.update_layout(height=340, margin=dict(l=10, r=10, t=10, b=10), legend_title_text="")
-        st.plotly_chart(fig, use_container_width=True)
 
 
 # ---------- Trang 2: Khách hàng ----------
