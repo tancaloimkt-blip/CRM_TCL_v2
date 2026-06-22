@@ -83,6 +83,19 @@ def inject_css() -> None:
             padding: 10px 14px; border-radius: 10px; margin: 2px 0 4px;
             box-shadow: 0 3px 10px rgba(192,20,10,0.30);
           }
+          /* Expander trong sidebar (form đổi mật khẩu): nền trắng -> chữ tối */
+          [data-testid="stSidebar"] [data-testid="stExpander"] summary,
+          [data-testid="stSidebar"] [data-testid="stExpander"] summary * { color:#E8EEF7 !important; }
+          [data-testid="stSidebar"] [data-testid="stExpander"] label,
+          [data-testid="stSidebar"] [data-testid="stExpander"] label *,
+          [data-testid="stSidebar"] [data-testid="stExpander"] [data-testid="stAlert"] * {
+            color:#1F2937 !important;
+          }
+          [data-testid="stSidebar"] [data-testid="stFormSubmitButton"] button {
+            background:#1B2A6B !important; border:none !important;
+            border-radius:10px !important; font-weight:700 !important;
+          }
+          [data-testid="stSidebar"] [data-testid="stFormSubmitButton"] button * { color:#fff !important; }
 
           /* Card trắng cho nội dung chính */
           [data-testid="stDataFrame"] {
