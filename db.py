@@ -176,6 +176,11 @@ def fetch_notes(client: Client, customer_id: int | None = None) -> pd.DataFrame:
     return df
 
 
+def update_customer_stage(client: Client, customer_id: int, giai_doan: str) -> None:
+    """Đổi giai đoạn chăm sóc của 1 khách (dùng khi kéo-thả Kanban)."""
+    client.table("customers").update({"giai_doan": giai_doan}).eq("id", int(customer_id)).execute()
+
+
 def add_note(client: Client, customer_id: int, noi_dung: str,
              follow_up_date=None) -> None:
     payload = {

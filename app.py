@@ -544,6 +544,12 @@ def page_customers(client, customers, orders, profiles) -> None:
                         df["ten_kh"].tolist(), key="cust_pick")
     row = df[df["ten_kh"] == pick].iloc[0]
 
+    render_customer_360(client, row, orders, profiles)
+
+
+def render_customer_360(client, row, orders, profiles, allow_edit: bool = True) -> None:
+    """Hiển thị hồ sơ khách 360°: header + chip + sửa/xoá + ghi chú + lịch sử đơn.
+    Dùng chung cho trang Khách hàng và trang Tiềm Năng."""
     # --- Header hồ sơ 360 ---
     ten = _s(row.get("ten_kh")) or "—"
     company = _s(row.get("ten_cong_ty"))
@@ -574,11 +580,11 @@ def page_customers(client, customers, orders, profiles) -> None:
     if _s(row.get("ghi_chu")):
         st.markdown(f"📝 **Ghi chú chung:** {_s(row.get('ghi_chu'))}")
 
-    if can_edit():
+    if allow_edit and can_edit():
         with st.expander("✏️ Sửa thông tin khách này"):
             _form_edit_customer(client, row, profiles)
 
-    if can_delete():
+    if allow_edit and can_delete():
         with st.expander("🗑️ Xoá khách hàng này"):
             _form_delete_customer(client, row, orders)
 
@@ -1103,46 +1109,76 @@ def page_audit(client) -> None:
 
 # ---------- Trang: Pipeline (Kanban + phễu) ----------
 
-def page_pipeline(client, customers, orders) -> None:
-    page_header("🗂️", "Pipeline bán hàng", "Đơn hàng theo tình trạng giao dịch")
-    o = orders_with_names(orders, customers)
-    if o.empty or "tinh_trang_giao_dich" not in o:
-        st.info("Chưa có dữ liệu giao dịch.")
+GIAI_DOAN_OPTS = ["Tiềm năng", "Đang tư vấn", "Đã báo giá", "Đã chốt", "Đã thanh toán"]
+
+
+def page_pipeline(client, customers, orders, profiles) -> None:
+    page_header("🎯", "Tiềm Năng", "Kéo-thả khách hàng qua các giai đoạn chăm sóc")
+
+    if customers.empty:
+        st.info("Chưa có khách hàng nào (theo quyền của bạn).")
+        return
+    if "giai_doan" not in customers.columns:
+        st.warning("Chưa có cột 'giai_doan'. Hãy chạy file sql/06_giai_doan.sql trên Supabase.")
         return
 
-    stages = ["Đang tư vấn", "Đã gửi báo giá", "Đã chốt"]
-    counts = {s: int((o["tinh_trang_giao_dich"].astype(str) == s).sum()) for s in stages}
+    cust = customers.copy()
+    cust["giai_doan"] = cust["giai_doan"].fillna("Tiềm năng").replace("", "Tiềm năng")
+
+    # Nhãn thẻ: "id · Tên khách" (id để map ngược, đảm bảo duy nhất)
+    def _label(r):
+        return f'{r["id"]} · {_s(r.get("ten_kh")) or "—"}'
+
+    cust["_label"] = cust.apply(_label, axis=1)
+    label_to_id = dict(zip(cust["_label"], cust["id"]))
+    id_to_stage = dict(zip(cust["id"], cust["giai_doan"]))
+
+    # Dựng dữ liệu cho component kéo-thả
+    containers = []
+    for stage in GIAI_DOAN_OPTS:
+        items = cust.loc[cust["giai_doan"] == stage, "_label"].tolist()
+        containers.append({"header": f"{stage} ({len(items)})", "items": items})
+
+    try:
+        from streamlit_sortables import sort_items
+    except Exception:
+        st.error("Thiếu thư viện streamlit-sortables. Chạy: pip install streamlit-sortables")
+        return
+
+    st.caption("Kéo thẻ khách hàng từ cột này sang cột khác để đổi giai đoạn chăm sóc.")
+    new_state = sort_items(containers, multi_containers=True, direction="horizontal",
+                           key="kanban_giai_doan")
+
+    # Phát hiện thẻ bị kéo sang cột mới -> cập nhật database
+    changed = 0
+    for i, stage in enumerate(GIAI_DOAN_OPTS):
+        for label in new_state[i]["items"]:
+            cid = label_to_id.get(label)
+            if cid is not None and id_to_stage.get(cid) != stage:
+                try:
+                    db.update_customer_stage(client, int(cid), stage)
+                    changed += 1
+                except Exception as e:
+                    st.error(f"Lỗi cập nhật: {e}")
+    if changed:
+        st.success(f"Đã chuyển {changed} khách sang giai đoạn mới.")
+        st.rerun()
 
     # Phễu chuyển đổi
-    st.markdown("#### 🔻 Phễu chuyển đổi")
-    fig = px.funnel(
-        x=[counts[s] for s in stages], y=stages,
-        color_discrete_sequence=["#1B2A6B"],
-    )
-    fig.update_layout(height=280, margin=dict(l=10, r=10, t=10, b=10))
+    st.divider()
+    st.markdown("##### 🔻 Phễu chuyển đổi")
+    counts = [int((cust["giai_doan"] == s).sum()) for s in GIAI_DOAN_OPTS]
+    fig = px.funnel(x=counts, y=GIAI_DOAN_OPTS, color_discrete_sequence=["#1B2A6B"])
+    fig.update_layout(height=260, margin=dict(l=10, r=10, t=10, b=10))
     st.plotly_chart(fig, use_container_width=True)
-    won = counts["Đã chốt"]
-    quoted = counts["Đã gửi báo giá"] + won
-    rate = (won / quoted * 100) if quoted else 0
-    st.caption(f"Tỷ lệ chốt trên số đã báo giá: **{rate:.0f}%**")
 
-    # Kanban
-    st.markdown("#### 📋 Bảng Kanban")
-    all_stages = stages + ["Từ chối dịch vụ"]
-    cols = st.columns(len(all_stages))
-    for col, stage in zip(cols, all_stages):
-        sub = o[o["tinh_trang_giao_dich"].astype(str) == stage]
-        cards = ""
-        for _, r in sub.head(40).iterrows():
-            ten = r.get("ten_kh") or "—"
-            hang = r.get("ten_hang") or ""
-            gia = db.fmt_usd(r.get("gia_ban")) if pd.notna(r.get("gia_ban")) else ""
-            cards += (f'<div class="kan-card"><div class="t">{ten}</div>'
-                      f'<div class="m">{hang}</div><div class="p">{gia}</div></div>')
-        col.markdown(
-            f'<div class="kan-col"><h5>{stage} ({len(sub)})</h5>{cards}</div>',
-            unsafe_allow_html=True,
-        )
+    # Xem chi tiết 1 khách
+    st.divider()
+    st.markdown("##### 👤 Xem chi tiết khách hàng")
+    pick = st.selectbox("Chọn khách", ["(Chọn)"] + cust["ten_kh"].tolist(), key="potential_pick")
+    if pick != "(Chọn)":
+        row = customers[customers["ten_kh"] == pick].iloc[0]
+        render_customer_360(client, row, orders, profiles)
 
 
 # ---------- Trang: Nhắc việc (follow-up) ----------
@@ -1316,7 +1352,7 @@ def main() -> None:
 
     # Danh sách trang + icon (emoji)
     nav = [("Tổng quan", "📊"), ("Khách hàng", "👥"), ("Đơn hàng", "📦"),
-           ("Pipeline", "🗂️"), ("Vận chuyển", "🚢"), ("Công nợ", "💰"),
+           ("Tiềm Năng", "🎯"), ("Vận chuyển", "🚢"), ("Công nợ", "💰"),
            ("Nhắc việc", "🔔")]
     if can_audit():
         nav.append(("Lịch sử", "🕓"))
@@ -1361,8 +1397,8 @@ def main() -> None:
         page_customers(client, customers, orders, profiles)
     elif page == "Đơn hàng":
         page_orders(client, customers, orders)
-    elif page == "Pipeline":
-        page_pipeline(client, customers, orders)
+    elif page == "Tiềm Năng":
+        page_pipeline(client, customers, orders, profiles)
     elif page == "Vận chuyển":
         page_tracking(client, customers, orders)
     elif page == "Công nợ":

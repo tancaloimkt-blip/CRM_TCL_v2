@@ -5,3 +5,4 @@ openpyxl>=3.1.2
 supabase>=2.4.0
 numpy>=1.26.0
 XlsxWriter>=3.2.0
+streamlit-sortables>=0.3.1
