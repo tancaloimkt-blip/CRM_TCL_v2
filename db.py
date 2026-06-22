@@ -99,6 +99,18 @@ def login(email: str, password: str) -> tuple[bool, str]:
     return True, "OK"
 
 
+def change_password(new_password: str) -> tuple[bool, str]:
+    """Đổi mật khẩu của user đang đăng nhập."""
+    try:
+        client = create_client(SUPABASE_URL, SUPABASE_KEY)
+        client.auth.set_session(st.session_state["access_token"],
+                                st.session_state["refresh_token"])
+        client.auth.update_user({"password": new_password})
+        return True, "OK"
+    except Exception as e:
+        return False, str(e)
+
+
 def logout() -> None:
     for k in ("access_token", "refresh_token", "user_id", "email", "role", "ho_ten"):
         st.session_state.pop(k, None)

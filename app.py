@@ -1205,6 +1205,23 @@ def main() -> None:
         st.sidebar.title("📦 CRM TCL")
     st.sidebar.markdown(f"**{st.session_state['ho_ten']}**")
     st.sidebar.caption(f"{ROLE_LABEL.get(db.role(), db.role())} · {st.session_state['email']}")
+
+    with st.sidebar.expander("🔑 Đổi mật khẩu"):
+        with st.form("change_pw", clear_on_submit=True):
+            p1 = st.text_input("Mật khẩu mới", type="password")
+            p2 = st.text_input("Nhập lại mật khẩu mới", type="password")
+            if st.form_submit_button("Cập nhật mật khẩu"):
+                if len(p1) < 6:
+                    st.error("Mật khẩu phải từ 6 ký tự trở lên.")
+                elif p1 != p2:
+                    st.error("Hai lần nhập không khớp.")
+                else:
+                    ok, msg = db.change_password(p1)
+                    if ok:
+                        st.success("Đã đổi mật khẩu. Lần sau đăng nhập bằng mật khẩu mới.")
+                    else:
+                        st.error(f"Lỗi: {msg}")
+
     if st.sidebar.button("🚪  Đăng xuất", use_container_width=True, key="logout_btn"):
         db.logout()
         st.rerun()
